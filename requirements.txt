@@ -1,0 +1,8 @@
+Flask
+pygame
+numpy
+jax
+jaxlib
+dm-haiku
+noise
+Pillow

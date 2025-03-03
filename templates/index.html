@@ -1,0 +1,464 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL Car Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            max-width: 1200px;
+        }
+        .game-container {
+            position: relative;
+            border: 2px solid #444;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .game-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 10;
+        }
+        .game-overlay.hidden {
+            display: none;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 20px;
+            background-color: #222;
+            border-radius: 5px;
+            min-width: 300px;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button.danger {
+            background-color: #e74c3c;
+        }
+        button.danger:hover {
+            background-color: #c0392b;
+        }
+        button.success {
+            background-color: #2ecc71;
+        }
+        button.success:hover {
+            background-color: #27ae60;
+        }
+        .keyboard-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin-top: 20px;
+        }
+        .key {
+            background-color: #333;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 15px;
+            text-align: center;
+            user-select: none;
+        }
+        .key.active {
+            background-color: #3498db;
+        }
+        .key.empty {
+            visibility: hidden;
+        }
+        .stats {
+            padding: 20px;
+            background-color: #222;
+            border-radius: 5px;
+            min-width: 300px;
+        }
+        .chart {
+            width: 100%;
+            height: 200px;
+            margin-top: 20px;
+            background-color: #333;
+            border-radius: 5px;
+            position: relative;
+            overflow: hidden;
+        }
+        .chart-line {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: flex-end;
+        }
+        .chart-bar {
+            flex: 1;
+            background-color: #3498db;
+            margin: 0 1px;
+            min-width: 2px;
+        }
+        .model-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+        }
+        .model-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid #444;
+            cursor: pointer;
+        }
+        .model-item:hover {
+            background-color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>RL Car Game - Remote Training</h1>
+    
+    <div class="container">
+        <div class="game-container">
+            <img id="gameFrame" src="/video_feed" width="800" height="600" alt="Game Stream">
+            <div id="gameOverlay" class="game-overlay">
+                <button id="startButton" class="success">Start Game</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <h2>Game Controls</h2>
+            <div class="button-group">
+                <button id="resetButton">Reset</button>
+                <button id="toggleControlButton">Toggle AI/Manual</button>
+                <button id="stopButton" class="danger">Stop</button>
+            </div>
+            
+            <h3>Manual Control</h3>
+            <div class="keyboard-controls">
+                <div class="key empty"></div>
+                <div id="upKey" class="key">↑</div>
+                <div class="key empty"></div>
+                <div id="leftKey" class="key">←</div>
+                <div id="downKey" class="key">↓</div>
+                <div id="rightKey" class="key">→</div>
+            </div>
+            
+            <h3>Model Management</h3>
+            <div class="button-group">
+                <button id="saveModelButton">Save Model</button>
+                <button id="loadModelButton">Load Model</button>
+            </div>
+            <div id="modelList" class="model-list"></div>
+        </div>
+        
+        <div class="stats">
+            <h2>Training Statistics</h2>
+            <div>
+                <p>Exploration Rate: <span id="explorationRate">1.00</span></p>
+                <p>Episodes Completed: <span id="episodesCompleted">0</span></p>
+                <p>Average Reward: <span id="averageReward">0.00</span></p>
+                <p>Average Loss: <span id="averageLoss">0.00</span></p>
+            </div>
+            
+            <h3>Episode Rewards</h3>
+            <div id="rewardsChart" class="chart">
+                <div class="chart-line" id="rewardsLine"></div>
+            </div>
+            
+            <h3>Training Loss</h3>
+            <div id="lossChart" class="chart">
+                <div class="chart-line" id="lossLine"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const gameFrame = document.getElementById('gameFrame');
+        const gameOverlay = document.getElementById('gameOverlay');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const toggleControlButton = document.getElementById('toggleControlButton');
+        const stopButton = document.getElementById('stopButton');
+        const saveModelButton = document.getElementById('saveModelButton');
+        const loadModelButton = document.getElementById('loadModelButton');
+        const modelList = document.getElementById('modelList');
+        
+        // Stats elements
+        const explorationRate = document.getElementById('explorationRate');
+        const episodesCompleted = document.getElementById('episodesCompleted');
+        const averageReward = document.getElementById('averageReward');
+        const averageLoss = document.getElementById('averageLoss');
+        const rewardsLine = document.getElementById('rewardsLine');
+        const lossLine = document.getElementById('lossLine');
+        
+        // Keyboard controls
+        const upKey = document.getElementById('upKey');
+        const downKey = document.getElementById('downKey');
+        const leftKey = document.getElementById('leftKey');
+        const rightKey = document.getElementById('rightKey');
+        
+        // Game state
+        let gameRunning = false;
+        let manualControl = true;
+        let keyState = {
+            up: false,
+            down: false,
+            left: false,
+            right: false
+        };
+        
+        // Event listeners
+        startButton.addEventListener('click', startGame);
+        resetButton.addEventListener('click', resetGame);
+        toggleControlButton.addEventListener('click', toggleControl);
+        stopButton.addEventListener('click', stopGame);
+        saveModelButton.addEventListener('click', saveModel);
+        loadModelButton.addEventListener('click', listModels);
+        
+        // Keyboard event listeners
+        document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('keyup', handleKeyUp);
+        
+        // Functions
+        function startGame() {
+            fetch('/start')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        gameRunning = true;
+                        gameOverlay.classList.add('hidden');
+                    }
+                });
+        }
+        
+        function stopGame() {
+            fetch('/stop')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'stopped') {
+                        gameRunning = false;
+                        gameOverlay.classList.remove('hidden');
+                    }
+                });
+        }
+        
+        function resetGame() {
+            fetch('/reset')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Game reset:', data);
+                });
+        }
+        
+        function toggleControl() {
+            fetch('/toggle_control')
+                .then(response => response.json())
+                .then(data => {
+                    manualControl = data.manual_control;
+                    toggleControlButton.textContent = manualControl ? 'Switch to AI Control' : 'Switch to Manual Control';
+                });
+        }
+        
+        function saveModel() {
+            fetch('/save_model')
+                .then(response => response.json())
+                .then(data => {
+                    alert('Model saved successfully!');
+                    listModels();
+                });
+        }
+        
+        function listModels() {
+            fetch('/list_models')
+                .then(response => response.json())
+                .then(data => {
+                    modelList.innerHTML = '';
+                    data.models.forEach(model => {
+                        const modelItem = document.createElement('div');
+                        modelItem.className = 'model-item';
+                        modelItem.textContent = model;
+                        modelItem.addEventListener('click', () => loadModelFile(model));
+                        modelList.appendChild(modelItem);
+                    });
+                });
+        }
+        
+        function loadModelFile(filename) {
+            fetch(`/load_model?file=${encodeURIComponent(filename)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'loaded') {
+                        alert(`Model ${filename} loaded successfully!`);
+                        updateStats();
+                    } else {
+                        alert(`Failed to load model ${filename}`);
+                    }
+                });
+        }
+        
+        function handleKeyDown(e) {
+            if (!gameRunning || !manualControl) return;
+            
+            switch (e.key) {
+                case 'ArrowUp':
+                    keyState.up = true;
+                    upKey.classList.add('active');
+                    break;
+                case 'ArrowDown':
+                    keyState.down = true;
+                    downKey.classList.add('active');
+                    break;
+                case 'ArrowLeft':
+                    keyState.left = true;
+                    leftKey.classList.add('active');
+                    break;
+                case 'ArrowRight':
+                    keyState.right = true;
+                    rightKey.classList.add('active');
+                    break;
+            }
+            
+            sendControlInput();
+        }
+        
+        function handleKeyUp(e) {
+            if (!manualControl) return;
+            
+            switch (e.key) {
+                case 'ArrowUp':
+                    keyState.up = false;
+                    upKey.classList.remove('active');
+                    break;
+                case 'ArrowDown':
+                    keyState.down = false;
+                    downKey.classList.remove('active');
+                    break;
+                case 'ArrowLeft':
+                    keyState.left = false;
+                    leftKey.classList.remove('active');
+                    break;
+                case 'ArrowRight':
+                    keyState.right = false;
+                    rightKey.classList.remove('active');
+                    break;
+            }
+            
+            sendControlInput();
+        }
+        
+        function sendControlInput() {
+            if (!gameRunning || !manualControl) return;
+            
+            let steering = 0;
+            let throttle = 0;
+            
+            if (keyState.left) steering = -1.0;
+            if (keyState.right) steering = 1.0;
+            if (keyState.up) throttle = 1.0;
+            if (keyState.down) throttle = -1.0;
+            
+            fetch('/control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    steering: steering,
+                    throttle: throttle
+                })
+            });
+        }
+        
+        function updateStats() {
+            fetch('/stats')
+                .then(response => response.json())
+                .then(data => {
+                    explorationRate.textContent = data.exploration_rate.toFixed(2);
+                    episodesCompleted.textContent = data.episode_rewards ? data.episode_rewards.length : 0;
+                    
+                    if (data.episode_rewards && data.episode_rewards.length > 0) {
+                        const avgReward = data.episode_rewards.reduce((a, b) => a + b, 0) / data.episode_rewards.length;
+                        averageReward.textContent = avgReward.toFixed(2);
+                        updateChart(rewardsLine, data.episode_rewards);
+                    }
+                    
+                    if (data.training_losses && data.training_losses.length > 0) {
+                        const avgLoss = data.training_losses.reduce((a, b) => a + b, 0) / data.training_losses.length;
+                        averageLoss.textContent = avgLoss.toFixed(4);
+                        updateChart(lossLine, data.training_losses);
+                    }
+                });
+        }
+        
+        function updateChart(chartElement, data) {
+            chartElement.innerHTML = '';
+            
+            if (!data || data.length === 0) return;
+            
+            const max = Math.max(...data);
+            const min = Math.min(...data);
+            const range = max - min || 1;
+            
+            data.forEach(value => {
+                const bar = document.createElement('div');
+                bar.className = 'chart-bar';
+                const height = ((value - min) / range) * 100;
+                bar.style.height = `${Math.max(1, height)}%`;
+                chartElement.appendChild(bar);
+            });
+        }
+        
+        // Initialize
+        function init() {
+            // Check if game is running
+            fetch('/stats')
+                .then(response => response.json())
+                .then(data => {
+                    updateStats();
+                    listModels();
+                });
+            
+            // Set up stats update interval
+            setInterval(updateStats, 5000);
+        }
+        
+        init();
+    </script>
+</body>
+</html>
