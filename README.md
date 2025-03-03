@@ -1,6 +1,6 @@
 # RL Car Game - Advanced Reinforcement Learning and Simulation
 
-![Project Logo](https://avatars.githubusercontent.com/u/137281646?s=200&v=4)
+
 
 ## Overview
 
