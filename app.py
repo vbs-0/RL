@@ -2,6 +2,12 @@ import flask
 from flask import Flask, render_template, Response, jsonify
 import pygame
 import numpy as np
+
+# Disable JAX JIT compilation to prevent initialization hangs
+import os
+os.environ['JAX_DISABLE_JIT'] = '1'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
 import jax
 import jax.numpy as jnp
 from jax import random
@@ -9,7 +15,6 @@ import math
 import noise
 import haiku as hk
 from collections import deque
-import os
 import json
 import base64
 import io
