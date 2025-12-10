@@ -1,0 +1,14 @@
+{
+  "algorithm": "policy_gradient",
+  "env_config": {
+    "max_steps": 500
+  },
+  "algorithm_config": {
+    "learning_rate": 0.001,
+    "gamma": 0.99,
+    "entropy_coef": 0.01,
+    "batch_size": 32
+  },
+  "seed": 42,
+  "timestamp": "2025-12-10T13:42:41.976776"
+}
