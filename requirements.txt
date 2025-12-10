@@ -6,3 +6,4 @@ jaxlib
 dm-haiku
 noise
 Pillow
+optax

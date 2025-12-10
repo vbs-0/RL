@@ -108,9 +108,17 @@ class FlaskRLCarEnv:
         self.current_episode_reward += reward
 
         if self.step_counter % self.train_every == 0:
-            self.world_model.add_experience(self.get_observation(), jnp.array(action), next_obs, jnp.array([reward]))
-            loss = self.world_model.train_step()
-            self.training_losses.append(loss)
+            self.world_model.add_experience(self.get_observation(), jnp.array(action), next_obs, reward)
+            world_loss = self.world_model.train_step()
+            self.training_losses.append(world_loss)
+            
+            # Train actor on the latest batch
+            if len(self.world_model.buffer) >= self.world_model.batch_size:
+                indices = jnp.arange(min(self.world_model.batch_size, len(self.world_model.buffer)))
+                batch = [self.world_model.buffer[i] for i in indices]
+                latent_batch = jnp.array([self.world_model.encode(item[0]) for item in batch])
+                reward_batch = jnp.array([float(item[3][0]) for item in batch])
+                actor_loss = self.actor.train_step(latent_batch, reward_batch)
             
             # Update global training stats
             game_state['training_stats']['training_losses'] = self.training_losses[-100:]

@@ -3,11 +3,12 @@ import pygame
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jax import random
+from jax import random, grad
 import math
 import noise
 import haiku as hk
 from collections import deque
+import optax
 import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -448,6 +449,18 @@ class WorldModel:
         self.decoder_params = self.decoder.init(subkey3, dummy_latent)
         self.reward_params = self.reward.init(subkey4, dummy_latent)
         
+        # Initialize optimizers for each network
+        self.encoder_optimizer = optax.adam(learning_rate=1e-3)
+        self.dynamics_optimizer = optax.adam(learning_rate=1e-3)
+        self.decoder_optimizer = optax.adam(learning_rate=1e-3)
+        self.reward_optimizer = optax.adam(learning_rate=1e-3)
+        
+        # Initialize optimizer states
+        self.encoder_opt_state = self.encoder_optimizer.init(self.encoder_params)
+        self.dynamics_opt_state = self.dynamics_optimizer.init(self.dynamics_params)
+        self.decoder_opt_state = self.decoder_optimizer.init(self.decoder_params)
+        self.reward_opt_state = self.reward_optimizer.init(self.reward_params)
+        
         # Buffer for experience replay
         self.buffer = deque(maxlen=10000)
         self.batch_size = 32
@@ -484,32 +497,68 @@ class WorldModel:
         self.key, _ = random.split(self.key)
         
         batch = [self.buffer[int(i)] for i in indices]
-        obs_batch = jnp.array([item[0] for item in batch])
-        action_batch = jnp.array([item[1] for item in batch])
-        next_obs_batch = jnp.array([item[2] for item in batch])
-        reward_batch = jnp.array([item[3] for item in batch])
+        obs_batch = jnp.array([np.array(item[0]) for item in batch])
+        action_batch = jnp.array([np.array(item[1]) for item in batch])
+        next_obs_batch = jnp.array([np.array(item[2]) for item in batch])
+        # Extract scalar rewards
+        reward_batch = jnp.array([float(item[3]) for item in batch])
         
-        # Get latent representations
-        latent_batch = self.encoder.apply(self.encoder_params, None, obs_batch)
+        # Define loss function for all networks
+        def compute_loss(encoder_params, dynamics_params, decoder_params, reward_params):
+            # Get latent representations
+            latent_batch = self.encoder.apply(encoder_params, None, obs_batch)
+            
+            # Predict next latent and reward
+            next_latent_batch = self.dynamics.apply(dynamics_params, None, latent_batch, action_batch)
+            predicted_reward = self.reward.apply(reward_params, None, latent_batch)  # Shape: (batch_size, 1)
+            
+            # Decode to observations
+            decoded_obs = self.decoder.apply(decoder_params, None, latent_batch)
+            decoded_next_obs = self.decoder.apply(decoder_params, None, next_latent_batch)
+            
+            # Calculate losses
+            reconstruction_loss = jnp.mean((decoded_obs - obs_batch) ** 2)
+            next_reconstruction_loss = jnp.mean((decoded_next_obs - next_obs_batch) ** 2)
+            reward_loss = jnp.mean((predicted_reward.squeeze() - reward_batch) ** 2)
+            
+            total_loss = reconstruction_loss + next_reconstruction_loss + reward_loss
+            return total_loss, (reconstruction_loss, next_reconstruction_loss, reward_loss)
         
-        # Predict next latent and reward
-        next_latent_batch = self.dynamics.apply(self.dynamics_params, None, latent_batch, action_batch)
-        predicted_reward = self.reward.apply(self.reward_params, None, latent_batch)
+        # Compute gradients for all parameters
+        (total_loss, loss_components), (encoder_grads, dynamics_grads, decoder_grads, reward_grads) = grad(
+            compute_loss, argnums=(0, 1, 2, 3), has_aux=True
+        )(self.encoder_params, self.dynamics_params, self.decoder_params, self.reward_params)
         
-        # Decode to observations
-        decoded_obs = self.decoder.apply(self.decoder_params, None, latent_batch)
-        decoded_next_obs = self.decoder.apply(self.decoder_params, None, next_latent_batch)
+        # Update encoder
+        encoder_updates, self.encoder_opt_state = self.encoder_optimizer.update(
+            encoder_grads, self.encoder_opt_state
+        )
+        self.encoder_params = optax.apply_updates(self.encoder_params, encoder_updates)
         
-        # Calculate losses (simplified)
-        reconstruction_loss = jnp.mean((decoded_obs - obs_batch) ** 2)
-        next_reconstruction_loss = jnp.mean((decoded_next_obs - next_obs_batch) ** 2)
-        reward_loss = jnp.mean((predicted_reward - reward_batch) ** 2)
+        # Update dynamics
+        dynamics_updates, self.dynamics_opt_state = self.dynamics_optimizer.update(
+            dynamics_grads, self.dynamics_opt_state
+        )
+        self.dynamics_params = optax.apply_updates(self.dynamics_params, dynamics_updates)
         
-        total_loss = reconstruction_loss + next_reconstruction_loss + reward_loss
+        # Update decoder
+        decoder_updates, self.decoder_opt_state = self.decoder_optimizer.update(
+            decoder_grads, self.decoder_opt_state
+        )
+        self.decoder_params = optax.apply_updates(self.decoder_params, decoder_updates)
         
-        # In a real implementation, we would update parameters with optimizer here
-        # For simplicity, we're just returning the loss
-        return float(total_loss)
+        # Update reward
+        reward_updates, self.reward_opt_state = self.reward_optimizer.update(
+            reward_grads, self.reward_opt_state
+        )
+        self.reward_params = optax.apply_updates(self.reward_params, reward_updates)
+        
+        # Debug: Print actual loss value
+        actual_loss = float(total_loss)
+        if actual_loss > 0:
+            print(f"WorldModel Loss: {actual_loss:.6f}, Reconstruction: {float(loss_components[0]):.6f}")
+        
+        return actual_loss
 
 class Actor:
     def __init__(self, latent_size, action_size, seed=42):
@@ -533,6 +582,10 @@ class Actor:
         dummy_latent = jnp.zeros((1, self.latent_size))
         self.key, subkey = random.split(self.key)
         self.actor_params = self.actor.init(subkey, dummy_latent)
+        
+        # Initialize optimizer
+        self.actor_optimizer = optax.adam(learning_rate=1e-3)
+        self.actor_opt_state = self.actor_optimizer.init(self.actor_params)
     
     def get_action(self, latent, explore=False):
         # Add batch dimension
@@ -548,6 +601,28 @@ class Actor:
             action = jnp.clip(action + noise, -1.0, 1.0)
         
         return action
+    
+    def train_step(self, latent_batch, reward_batch):
+        """Train actor to maximize expected rewards using policy gradient"""
+        def compute_actor_loss(actor_params):
+            # Get actions from policy
+            actions = self.actor.apply(actor_params, None, latent_batch)
+            
+            # Policy gradient loss: -mean(reward * log_prob)
+            # Approximated by: -mean(reward * action_output)
+            actor_loss = -jnp.mean(reward_batch.reshape(-1, 1) * actions)
+            return actor_loss
+        
+        # Compute gradient
+        actor_grads = grad(compute_actor_loss)(self.actor_params)
+        
+        # Update parameters
+        actor_updates, self.actor_opt_state = self.actor_optimizer.update(
+            actor_grads, self.actor_opt_state
+        )
+        self.actor_params = optax.apply_updates(self.actor_params, actor_updates)
+        
+        return float(compute_actor_loss(self.actor_params))
 
 class RLCarEnv:
     def __init__(self):
