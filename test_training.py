@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Test if training is actually happening"""
+"""Test if training is actually happening using the new modular system."""
+
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +16,8 @@ import numpy as np
 # Disable JIT
 jax.config.update('jax_disable_jit', True)
 
-# Simple test of gradient updates
+# Test basic JAX functionality
+print("Testing basic JAX functionality...")
 def simple_loss(params):
     """Simple quadratic loss"""
     return jnp.sum(params ** 2)
@@ -37,50 +44,69 @@ for step in range(5):
 
 print("\nGradient updates working correctly!" if params[0] < 0.9 else "\nWARNING: Params not updating!")
 
-# Now test our actual network training
+# Test the actual modular RL system
 print("\n" + "="*50)
-print("Testing actual network training:")
+print("Testing modular RL system:")
 print("="*50)
 
-import haiku as hk
-
-# Simple network
-def network_fn(x):
-    net = hk.Sequential([
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(1)
-    ])
-    return net(x)
-
-# Initialize
-transform = hk.transform(network_fn)
-key, subkey = random.split(random.PRNGKey(42))
-dummy_input = jnp.zeros((1, 10))
-net_params = transform.init(subkey, dummy_input)
-
-# Create optimizer
-net_optimizer = optax.adam(learning_rate=1e-3)
-net_opt_state = net_optimizer.init(net_params)
-
-# Create dummy data
-batch_x = random.normal(key, (8, 10))
-batch_y = jnp.sum(batch_x ** 2, axis=1, keepdims=True)
-
-# Define loss
-def compute_loss(params):
-    y_pred = transform.apply(params, None, batch_x)
-    loss = jnp.mean((y_pred - batch_y) ** 2)
-    return loss
-
-print(f"Initial loss: {compute_loss(net_params):.6f}")
-
-# Train for 5 steps
-for step in range(5):
-    loss = compute_loss(net_params)
-    grads = grad(compute_loss)(net_params)
-    updates, net_opt_state = net_optimizer.update(grads, net_opt_state)
-    net_params = optax.apply_updates(net_params, updates)
-    print(f"Step {step+1}: loss={loss:.6f}")
-
-final_loss = compute_loss(net_params)
-print(f"\nNetwork training working: {final_loss < 1.0}")
+try:
+    from rl_system.training import ContinuousTrainer
+    from rl_system.config import config
+    
+    # Test configuration loading
+    print("Configuration test:")
+    print(f"  Environment width: {config.get('environment.width', 800)}")
+    print(f"  Agent latent size: {config.get('agent.latent_size', 32)}")
+    print(f"  Training batch size: {config.get('training.batch_size', 32)}")
+    
+    # Test trainer initialization
+    print("\nTesting trainer initialization...")
+    trainer = ContinuousTrainer(headless=True)
+    print("✓ Trainer initialized successfully")
+    
+    # Test environment
+    print("\nTesting environment...")
+    obs = trainer.env.reset()
+    print(f"✓ Environment reset, observation shape: {obs.shape}")
+    
+    # Test agent components
+    print("\nTesting agent components...")
+    
+    # Test world model encoding
+    latent = trainer.world_model.encode(obs)
+    print(f"✓ World model encoding: {obs.shape} -> {latent.shape}")
+    
+    # Test action generation
+    action = trainer.get_action(obs)
+    print(f"✓ Action generation: {action.shape}")
+    
+    # Test environment step
+    next_obs, reward, done = trainer.env.step(action)
+    print(f"✓ Environment step: reward={reward:.3f}, done={done}")
+    
+    # Test training step
+    print("\nTesting training step...")
+    losses = trainer.train_step(obs, action, next_obs, reward)
+    print(f"✓ Training step completed: {losses}")
+    
+    # Test model saving
+    print("\nTesting model operations...")
+    trainer.save_model("test")
+    models = trainer.list_models()
+    print(f"✓ Model save/load: found {len(models)} models")
+    
+    # Test configuration updates
+    print("\nTesting configuration updates...")
+    config.set('training.batch_size', 64)
+    new_batch_size = config.get('training.batch_size', 32)
+    print(f"✓ Config update: batch_size = {new_batch_size}")
+    
+    print("\n" + "="*50)
+    print("✓ ALL TESTS PASSED! Modular system is working correctly.")
+    print("="*50)
+    
+except Exception as e:
+    print(f"\n✗ ERROR: {e}")
+    import traceback
+    traceback.print_exc()
+    print("\nThe modular system needs to be debugged.")

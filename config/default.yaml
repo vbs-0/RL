@@ -1,0 +1,58 @@
+# Default configuration for the RL car system
+
+# Environment configuration
+environment:
+  width: 800
+  height: 600
+  fps: 60
+  track_seed: 42
+  track_checkpoint_interval: 0.1
+
+# Car configuration  
+car:
+  max_speed: 5.0
+  size: 20
+  sensor_length: 150
+  sensor_angles: [-45, -22.5, 0, 22.5, 45]
+
+# Agent configuration
+agent:
+  latent_size: 32
+  action_size: 2
+  
+# World model configuration
+world_model:
+  encoder_hidden: 64
+  dynamics_hidden: 64  
+  decoder_hidden: 64
+  reward_hidden: 32
+  learning_rate: 1e-3
+
+# Actor configuration
+actor:
+  hidden_layers: [64, 32]
+  learning_rate: 1e-3
+
+# Training configuration
+training:
+  batch_size: 32
+  buffer_size: 10000
+  train_every: 10
+  exploration_initial: 1.0
+  exploration_min: 0.1
+  exploration_decay: 0.999
+  save_interval: 10  # Save model every N episodes
+  
+# Model saving configuration
+model:
+  save_path: "models/"
+  filename_prefix: "model_ep"
+
+# Colors for rendering
+colors:
+  white: [255, 255, 255]
+  black: [0, 0, 0]
+  red: [255, 0, 0]
+  green: [0, 255, 0]
+  blue: [0, 0, 255]
+  yellow: [255, 255, 0]
