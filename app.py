@@ -25,6 +25,7 @@ import pickle
 
 # Import your game code
 from test import Car, Track, WorldModel, Actor, BLACK, WHITE, RED, GREEN, BLUE, YELLOW
+from rl_system.monitoring import MetricsCollector
 
 app = Flask(__name__)
 
@@ -78,6 +79,19 @@ class FlaskRLCarEnv:
         # Create model directory if it doesn't exist
         if not os.path.exists(self.model_save_path):
             os.makedirs(self.model_save_path)
+        
+        # Initialize metrics collector
+        self.metrics_collector = MetricsCollector(log_dir='logs')
+        self.metrics_collector.load_metrics_from_disk()
+        
+        # Episode tracking for metrics
+        self.current_episode = 0
+        self.episode_steps = 0
+        self.episode_start_time = time.time()
+        self.episode_world_loss = 0.0
+        self.episode_actor_loss = 0.0
+        self.world_loss_count = 0
+        self.actor_loss_count = 0
 
     def get_observation(self):
         norm_sensors = np.array(self.car.sensor_readings) / self.car.sensor_length
@@ -96,6 +110,15 @@ class FlaskRLCarEnv:
         # Update sensors immediately
         self.car.update_sensors(self.track.track_points, self.track.obstacles)
         self.current_episode_reward = 0
+        
+        # Reset episode metrics
+        self.episode_steps = 0
+        self.episode_start_time = time.time()
+        self.episode_world_loss = 0.0
+        self.episode_actor_loss = 0.0
+        self.world_loss_count = 0
+        self.actor_loss_count = 0
+        
         return self.get_observation()
 
     def step(self, action):
@@ -106,11 +129,14 @@ class FlaskRLCarEnv:
         done = not on_track
         
         self.current_episode_reward += reward
+        self.episode_steps += 1
 
         if self.step_counter % self.train_every == 0:
             self.world_model.add_experience(self.get_observation(), jnp.array(action), next_obs, reward)
             world_loss = self.world_model.train_step()
             self.training_losses.append(world_loss)
+            self.episode_world_loss += float(world_loss)
+            self.world_loss_count += 1
             
             # Train actor on the latest batch
             if len(self.world_model.buffer) >= self.world_model.batch_size:
@@ -119,6 +145,8 @@ class FlaskRLCarEnv:
                 latent_batch = jnp.array([self.world_model.encode(item[0]) for item in batch])
                 reward_batch = jnp.array([float(item[3][0]) for item in batch])
                 actor_loss = self.actor.train_step(latent_batch, reward_batch)
+                self.episode_actor_loss += float(actor_loss)
+                self.actor_loss_count += 1
             
             # Update global training stats
             game_state['training_stats']['training_losses'] = self.training_losses[-100:]
@@ -136,6 +164,30 @@ class FlaskRLCarEnv:
         if done:
             self.episode_rewards.append(self.current_episode_reward)
             game_state['training_stats']['episode_rewards'] = self.episode_rewards[-100:]
+            
+            # Calculate steps per second
+            episode_duration = time.time() - self.episode_start_time
+            steps_per_second = self.episode_steps / max(episode_duration, 0.001)
+            
+            # Average losses for the episode
+            avg_world_loss = (self.episode_world_loss / self.world_loss_count 
+                            if self.world_loss_count > 0 else 0.0)
+            avg_actor_loss = (self.episode_actor_loss / self.actor_loss_count 
+                            if self.actor_loss_count > 0 else 0.0)
+            
+            # Log episode metrics
+            self.metrics_collector.log_episode({
+                'episode': self.current_episode,
+                'reward': float(self.current_episode_reward),
+                'actor_loss': float(avg_actor_loss),
+                'world_model_loss': float(avg_world_loss),
+                'steps': int(self.episode_steps),
+                'steps_per_second': float(steps_per_second),
+                'exploration_rate': float(self.explore_prob),
+            })
+            
+            self.current_episode += 1
+            
             # Reset current episode reward after episode ends
             self.current_episode_reward = 0
             
@@ -348,8 +400,25 @@ def control():
 
 @app.route('/stats')
 def get_stats():
-    """Return current training statistics"""
-    return jsonify(game_state['training_stats'])
+    """Return current training statistics with monitoring metrics"""
+    stats = game_state['training_stats'].copy()
+    
+    # Add metrics from the collector
+    metrics_history = env.metrics_collector.get_metrics_history()
+    aggregated_stats = env.metrics_collector.get_aggregated_stats()
+    
+    # Enrich stats with additional metrics
+    stats.update({
+        'metrics_history': metrics_history,
+        'aggregated_stats': aggregated_stats,
+        'steps_per_second': (
+            aggregated_stats.get('total_steps', 0) / 
+            max(aggregated_stats.get('uptime_seconds', 1), 1)
+        ),
+        'uptime_seconds': aggregated_stats.get('uptime_seconds', 0),
+    })
+    
+    return jsonify(stats)
 
 @app.route('/save_model')
 def save_model():
