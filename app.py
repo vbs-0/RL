@@ -25,6 +25,7 @@ import pickle
 
 # Import your game code
 from test import Car, Track, WorldModel, Actor, BLACK, WHITE, RED, GREEN, BLUE, YELLOW
+from rl_system.persistence import PersistenceManager
 
 app = Flask(__name__)
 
@@ -73,7 +74,9 @@ class FlaskRLCarEnv:
         self.training_losses = []
         self.current_episode_reward = 0
         self.best_progress = 0.0  # Track best progress achieved so far
+        self.best_mean_reward = -float('inf')
         self.model_save_path = "models/"
+        self.persistence = PersistenceManager(self.model_save_path)
         
         # Create model directory if it doesn't exist
         if not os.path.exists(self.model_save_path):
@@ -131,11 +134,18 @@ class FlaskRLCarEnv:
         current_progress = self.car.calculate_track_progress(self.track.track_points)
         if current_progress > self.best_progress:
             self.best_progress = current_progress
-            self.save_model()
+            self.save_model(reason="progress_improvement")
         
         if done:
             self.episode_rewards.append(self.current_episode_reward)
             game_state['training_stats']['episode_rewards'] = self.episode_rewards[-100:]
+            
+            # Check rolling mean reward improvement
+            mean_reward = np.mean(self.episode_rewards[-100:])
+            if mean_reward > self.best_mean_reward and len(self.episode_rewards) >= 10: 
+                 self.best_mean_reward = mean_reward
+                 self.save_model(reason="reward_improvement")
+
             # Reset current episode reward after episode ends
             self.current_episode_reward = 0
             
@@ -215,7 +225,7 @@ class FlaskRLCarEnv:
         
         return frame
     
-    def save_model(self):
+    def save_model(self, reason="manual"):
         """Save the model parameters to disk"""
         model_data = {
             'encoder_params': self.world_model.encoder_params,
@@ -228,18 +238,23 @@ class FlaskRLCarEnv:
             'training_losses': self.training_losses
         }
         
-        filename = f"{self.model_save_path}model_ep{len(self.episode_rewards)}.pkl"
-        with open(filename, 'wb') as f:
-            pickle.dump(model_data, f)
+        mean_reward = np.mean(self.episode_rewards[-100:]) if self.episode_rewards else 0.0
         
-        print(f"Model saved to {filename}")
+        metadata = {
+            'episode_count': len(self.episode_rewards),
+            'mean_reward': float(mean_reward),
+            'best_progress': float(self.best_progress),
+            'reason': reason
+        }
+        
+        filename = self.persistence.save_model(model_data, metadata)
+        print(f"Model saved to {filename} (reason: {reason})")
     
-    def load_model(self, filename):
+    def load_model(self, identifier):
         """Load model parameters from disk"""
-        if os.path.exists(filename):
-            with open(filename, 'rb') as f:
-                model_data = pickle.load(f)
-            
+        model_data = self.persistence.load_model(identifier)
+        
+        if model_data:
             self.world_model.encoder_params = model_data['encoder_params']
             self.world_model.dynamics_params = model_data['dynamics_params']
             self.world_model.decoder_params = model_data['decoder_params']
@@ -254,11 +269,17 @@ class FlaskRLCarEnv:
             game_state['training_stats']['training_losses'] = self.training_losses[-100:]
             game_state['training_stats']['exploration_rate'] = float(self.explore_prob)
             
-            print(f"Model loaded from {filename}")
+            if self.episode_rewards:
+                 self.best_mean_reward = np.mean(self.episode_rewards[-100:])
+            
+            print(f"Model loaded from {identifier}")
             return True
         else:
-            print(f"Model file {filename} not found")
+            print(f"Model {identifier} not found")
             return False
+
+    def list_models(self):
+        return self.persistence.list_models()
 
 # Initialize environment
 env = FlaskRLCarEnv()
@@ -354,7 +375,7 @@ def get_stats():
 @app.route('/save_model')
 def save_model():
     """Save the current model"""
-    env.save_model()
+    env.save_model(reason="manual")
     return jsonify({'status': 'saved'})
 
 @app.route('/load_model')
@@ -370,9 +391,7 @@ def load_model():
 @app.route('/list_models')
 def list_models():
     """List all saved models"""
-    models = []
-    if os.path.exists(env.model_save_path):
-        models = [f for f in os.listdir(env.model_save_path) if f.endswith('.pkl')]
+    models = env.list_models()
     return jsonify({'models': models})
 
 if __name__ == '__main__':
