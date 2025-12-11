@@ -15,23 +15,30 @@ This project is an advanced Reinforcement Learning (RL) based car game simulatio
 ## Project Structure
 
 ```
-newgame/
-├── .qodo
-│   └── history.sqlite
-├── app.py
-├── car_game.py
-├── game.py
-├── models/
+rl-car-game/
+├── app.py                      # Flask web application with headless rendering
+├── car_game.py                 # Standalone Pygame implementation
+├── game.py                     # RL-enabled game with DreamerV3
+├── test.py                     # Main RL environment with Optax training
+├── test_training.py            # Simple training sanity check
+├── requirements.txt            # Project dependencies
+├── README.md                   # This file
+├── models/                     # Saved model checkpoints
 │   ├── model_ep0.pkl
 │   ├── model_ep1.pkl
-│   ├── model_ep2.pkl
-│   ├── model_ep3.pkl
-│   ├── model_ep4.pkl
-│   ├── model_ep6.pkl
-│   └── model_ep81.pkl
-├── templates/
+│   └── ...
+├── templates/                  # Web interface templates
 │   └── index.html
-└── test.py
+├── tests/                      # Test suite (pytest)
+│   ├── __init__.py
+│   ├── test_environment.py     # Environment dynamics tests
+│   ├── test_world_model_training.py  # Training tests
+│   ├── test_trainer_scheduling.py    # Scheduling tests
+│   └── test_persistence.py     # Model persistence tests
+└── examples/                   # Example scripts
+    ├── __init__.py
+    ├── continuous_training.py  # Headless training example
+    └── manual_drive.py         # Interactive keyboard control
 ```
 
 - **app.py**:  
@@ -114,16 +121,100 @@ The Flask app exposes multiple endpoints to manage and interact with the game:
 
 1. **Install Dependencies**:  
    Use pip to install all required libraries:
+   ```bash
+   pip install -r requirements.txt
    ```
-   pip install flask pygame jax jaxlib haiku numpy pillow noise
+   Or install manually:
+   ```bash
+   pip install flask pygame jax jaxlib dm-haiku numpy pillow noise optax pytest
    ```
+
 2. **Run the Game with Web Interface**:  
    Execute `app.py` to launch both the Flask server and start the game loop:
-   ```
+   ```bash
    python app.py
    ```
+
 3. **Access the Game**:  
    Open your browser and navigate to `http://localhost:5000`. Use the on-screen buttons and controls for interaction.
+
+## Running Tests
+
+The project includes a comprehensive test suite using pytest that covers:
+- Environment dynamics (reset/step produce expected shapes)
+- World-model training steps (loss decreases on synthetic data)
+- Trainer scheduling (buffer fills, auto-save triggered)
+- Persistence metadata integrity
+
+To run all tests:
+```bash
+pytest
+```
+
+To run tests with verbose output:
+```bash
+pytest -v
+```
+
+To run a specific test file:
+```bash
+pytest tests/test_environment.py
+pytest tests/test_world_model_training.py
+pytest tests/test_trainer_scheduling.py
+pytest tests/test_persistence.py
+```
+
+To run tests with coverage report:
+```bash
+pytest --cov=. --cov-report=html
+```
+
+## Example Scripts
+
+The `examples/` directory contains demonstration scripts for core workflows:
+
+### Continuous Training (Headless)
+
+Run continuous training without a display, useful for automated training on servers:
+
+```bash
+python examples/continuous_training.py --episodes 10 --max-steps 1000 --seed 42
+```
+
+Options:
+- `--episodes N`: Number of episodes to train (default: 10)
+- `--max-steps N`: Maximum steps per episode (default: 1000)
+- `--seed N`: Random seed for reproducibility (default: 42)
+
+This script will:
+- Train the agent in headless mode (no visualization)
+- Save model checkpoints when progress improves
+- Print training statistics after each episode
+- Store models in the `models/` directory
+
+### Manual Drive (Interactive)
+
+Control the car manually with keyboard and optionally switch to AI control:
+
+```bash
+python examples/manual_drive.py --seed 42 --fps 60
+```
+
+Options:
+- `--seed N`: Random seed for track generation (default: 42)
+- `--fps N`: Frames per second (default: 60)
+
+Controls:
+- **Arrow Keys**: Drive (LEFT/RIGHT to steer, UP/DOWN to throttle/brake)
+- **SPACE**: Toggle between manual and AI control
+- **R**: Reset episode
+- **Q or ESC**: Quit
+
+This script demonstrates:
+- Manual keyboard control of the car
+- Seamless switching between manual and AI control
+- Real-time training in the background
+- Visual feedback with stats display
 
 ## Conclusion
 

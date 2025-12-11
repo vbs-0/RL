@@ -476,7 +476,7 @@ class WorldModel:
         action_batch = jnp.expand_dims(action, axis=0)
         
         next_latent = self.dynamics.apply(self.dynamics_params, None, latent_batch, action_batch)[0]
-        predicted_reward = float(self.reward.apply(self.reward_params, None, latent_batch)[0])
+        predicted_reward = float(self.reward.apply(self.reward_params, None, latent_batch)[0][0])
         
         return next_latent, predicted_reward
     
@@ -525,10 +525,11 @@ class WorldModel:
             return total_loss, (reconstruction_loss, next_reconstruction_loss, reward_loss)
         
         # Compute gradients for all parameters
-        (total_loss, loss_components), (encoder_grads, dynamics_grads, decoder_grads, reward_grads) = grad(
-            compute_loss, argnums=(0, 1, 2, 3), has_aux=True
-        )(self.encoder_params, self.dynamics_params, self.decoder_params, self.reward_params)
-        
+        # Compute gradients for all parameters
+        grad_fn = grad(compute_loss, argnums=(0, 1, 2, 3), has_aux=True)
+        grads_and_aux = grad_fn(self.encoder_params, self.dynamics_params, self.decoder_params, self.reward_params)
+        (encoder_grads, dynamics_grads, decoder_grads, reward_grads), loss_components = grads_and_aux
+        total_loss = sum(loss_components)
         # Update encoder
         encoder_updates, self.encoder_opt_state = self.encoder_optimizer.update(
             encoder_grads, self.encoder_opt_state
