@@ -107,10 +107,34 @@
             background-color: #222;
             border-radius: 5px;
             min-width: 300px;
+            max-width: 500px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-card {
+            background-color: #333;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+            margin: 5px 0;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
         }
         .chart {
             width: 100%;
-            height: 200px;
+            height: 150px;
             margin-top: 20px;
             background-color: #333;
             border-radius: 5px;
@@ -188,11 +212,40 @@
         
         <div class="stats">
             <h2>Training Statistics</h2>
-            <div>
-                <p>Exploration Rate: <span id="explorationRate">1.00</span></p>
-                <p>Episodes Completed: <span id="episodesCompleted">0</span></p>
-                <p>Average Reward: <span id="averageReward">0.00</span></p>
-                <p>Average Loss: <span id="averageLoss">0.00</span></p>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Episodes</div>
+                    <div class="stat-value" id="episodesCompleted">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Reward</div>
+                    <div class="stat-value" id="averageReward">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Exploration Rate</div>
+                    <div class="stat-value" id="explorationRate">1.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Steps/Sec</div>
+                    <div class="stat-value" id="stepsPerSecond">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Actor Loss</div>
+                    <div class="stat-value" id="averageActorLoss">0.0000</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">World Loss</div>
+                    <div class="stat-value" id="averageWorldLoss">0.0000</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Uptime (hours)</div>
+                    <div class="stat-value" id="uptimeHours">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Steps</div>
+                    <div class="stat-value" id="totalSteps">0</div>
+                </div>
             </div>
             
             <h3>Episode Rewards</h3>
@@ -200,9 +253,19 @@
                 <div class="chart-line" id="rewardsLine"></div>
             </div>
             
-            <h3>Training Loss</h3>
-            <div id="lossChart" class="chart">
-                <div class="chart-line" id="lossLine"></div>
+            <h3>Actor Loss</h3>
+            <div id="actorLossChart" class="chart">
+                <div class="chart-line" id="actorLossLine"></div>
+            </div>
+            
+            <h3>World Model Loss</h3>
+            <div id="worldLossChart" class="chart">
+                <div class="chart-line" id="worldLossLine"></div>
+            </div>
+            
+            <h3>Steps Per Second</h3>
+            <div id="stepsChart" class="chart">
+                <div class="chart-line" id="stepsLine"></div>
             </div>
         </div>
     </div>
@@ -223,9 +286,15 @@
         const explorationRate = document.getElementById('explorationRate');
         const episodesCompleted = document.getElementById('episodesCompleted');
         const averageReward = document.getElementById('averageReward');
-        const averageLoss = document.getElementById('averageLoss');
+        const averageActorLoss = document.getElementById('averageActorLoss');
+        const averageWorldLoss = document.getElementById('averageWorldLoss');
+        const stepsPerSecond = document.getElementById('stepsPerSecond');
+        const uptimeHours = document.getElementById('uptimeHours');
+        const totalSteps = document.getElementById('totalSteps');
         const rewardsLine = document.getElementById('rewardsLine');
-        const lossLine = document.getElementById('lossLine');
+        const actorLossLine = document.getElementById('actorLossLine');
+        const worldLossLine = document.getElementById('worldLossLine');
+        const stepsLine = document.getElementById('stepsLine');
         
         // Keyboard controls
         const upKey = document.getElementById('upKey');
@@ -409,9 +478,33 @@
             fetch('/stats')
                 .then(response => response.json())
                 .then(data => {
-                    explorationRate.textContent = data.exploration_rate.toFixed(2);
-                    episodesCompleted.textContent = data.episode_rewards ? data.episode_rewards.length : 0;
+                    // Update basic stats
+                    explorationRate.textContent = (data.exploration_rate || 1.0).toFixed(4);
                     
+                    // Update aggregated metrics
+                    const agg = data.aggregated_stats || {};
+                    episodesCompleted.textContent = agg.total_episodes || 0;
+                    averageReward.textContent = (agg.avg_reward || 0).toFixed(2);
+                    averageActorLoss.textContent = (agg.avg_actor_loss || 0).toFixed(4);
+                    averageWorldLoss.textContent = (agg.avg_world_loss || 0).toFixed(4);
+                    stepsPerSecond.textContent = (data.steps_per_second || 0).toFixed(2);
+                    uptimeHours.textContent = ((agg.uptime_seconds || 0) / 3600).toFixed(2);
+                    totalSteps.textContent = (agg.total_steps || 0).toLocaleString();
+                    
+                    // Update charts from metrics history
+                    if (data.metrics_history && data.metrics_history.length > 0) {
+                        const rewards = data.metrics_history.map(m => m.reward || 0);
+                        const actorLosses = data.metrics_history.map(m => m.actor_loss || 0);
+                        const worldLosses = data.metrics_history.map(m => m.world_model_loss || 0);
+                        const sps = data.metrics_history.map(m => m.steps_per_second || 0);
+                        
+                        updateChart(rewardsLine, rewards);
+                        updateChart(actorLossLine, actorLosses);
+                        updateChart(worldLossLine, worldLosses);
+                        updateChart(stepsLine, sps);
+                    }
+                    
+                    // Fallback to legacy data if metrics_history not available
                     if (data.episode_rewards && data.episode_rewards.length > 0) {
                         const avgReward = data.episode_rewards.reduce((a, b) => a + b, 0) / data.episode_rewards.length;
                         averageReward.textContent = avgReward.toFixed(2);
@@ -420,8 +513,8 @@
                     
                     if (data.training_losses && data.training_losses.length > 0) {
                         const avgLoss = data.training_losses.reduce((a, b) => a + b, 0) / data.training_losses.length;
-                        averageLoss.textContent = avgLoss.toFixed(4);
-                        updateChart(lossLine, data.training_losses);
+                        averageWorldLoss.textContent = avgLoss.toFixed(4);
+                        updateChart(worldLossLine, data.training_losses);
                     }
                 });
         }
